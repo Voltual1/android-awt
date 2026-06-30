@@ -1,0 +1,79 @@
+name: Android Build & Release
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch: # 支持手动触发
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # 定义需要编译的 ABI 架构矩阵
+        abi: [armeabi-v7a, arm64-v8a, x86, x86_64]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # 安装项目指定的 Android NDK 版本
+      - name: Install Android NDK
+        run: |
+          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;22.0.7026061"
+
+      # 自动从 awtcompat/build.gradle 提取版本号并附带运行号作为发布标识
+      - name: Set Version Output
+        id: version
+        run: |
+          VERSION=$(grep -oP "version\s+'\K[^']+" awtcompat/build.gradle || echo "1.0.4")
+          echo "BUILD_VERSION=${VERSION}-${{ github.run_number }}" >> $GITHUB_OUTPUT
+
+      - name: Grant Execute Permission to Gradle Wrapper
+        run: chmod +x gradlew
+
+      # 编译并发布到本地 Maven 仓库
+      # mock 凭证防止 gradle afterEvaluate 在配置阶段因缺少环境变量而报错
+      - name: Build & Publish to Maven Local
+        run: |
+          ./gradlew publishToMavenLocal -Pandroid.injected.abi=${{ matrix.abi }}
+        env:
+          MAVEN_PUBLISH_USERNAME: "mock_user"
+          MAVEN_PUBLISH_PASSWORD: "mock_password"
+
+      # 将构建生成的 .aar 提取并复制到输出文件夹，并重命名为目标格式
+      - name: Prepare Release Artifacts
+        run: |
+          mkdir -p output
+          AAR_FILE=$(find ~/.m2/repository/ro/andob/androidawt/androidawt -name "*.aar" | head -n 1)
+          if [ -f "$AAR_FILE" ]; then
+            cp "$AAR_FILE" output/MC2MT-android-${{ matrix.abi }}
+            echo "Successfully copied $AAR_FILE to output/MC2MT-android-${{ matrix.abi }}"
+          else
+            echo "Error: Generated AAR file not found in local Maven repository!"
+            exit 1
+          fi
+
+      # 创建草稿发行版并上传对应的 ABI 产物
+      # 触发条件支持：master分支的push 或 任何手动触发（workflow_dispatch）
+      - name: Create Draft Release
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/master') || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.BUILD_VERSION }}
+          name: "Android Build ${{ steps.version.outputs.BUILD_VERSION }}"
+          draft: true
+          body: |
+            ### Automated Build Artifacts
+            This release contains the compiled libraries for the Android target.
+          files: |
+            output/android-awt${{ matrix.abi }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
