@@ -37,7 +37,7 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
-          gradle-version: 6.7.1
+          gradle-version: 7.3.3
 
       # 自动从 awtcompat/build.gradle 提取版本号
       - name: Set Version Output
