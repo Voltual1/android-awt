@@ -14,16 +14,30 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      # 步骤 1：先使用 JDK 17 满足最新 sdkmanager 的运行要求
+      - name: Set up JDK 17 for SDK Manager
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      # 安装项目指定的 Android NDK 版本
+      # 步骤 2：安装项目指定的 Android NDK 版本
       - name: Install Android NDK
         run: |
           echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;22.0.7026061"
+
+      # 步骤 3：切换回 JDK 11 以确保与旧版本 Gradle 兼容
+      - name: Set up JDK 11 for Gradle Build
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+
+      # 步骤 4：直接在 runner 上安装特定版本的 Gradle (如 6.7.1)
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 6.7.1
 
       # 自动从 awtcompat/build.gradle 提取版本号
       - name: Set Version Output
@@ -32,14 +46,10 @@ jobs:
           VERSION=$(grep -oP "version\s+'\K[^']+" awtcompat/build.gradle || echo "1.0.4")
           echo "BUILD_VERSION=${VERSION}-${{ github.run_number }}" >> $GITHUB_OUTPUT
 
-      - name: Grant Execute Permission to Gradle Wrapper
-        run: chmod +x gradlew
-
       # 编译并发布到本地 Maven 仓库
-      # 不带 -Pandroid.injected.abi 参数，Gradle 会默认编译所有受支持的 ABI (armeabi-v7a, arm64-v8a, x86, x86_64) 并合并打包
       - name: Build & Publish to Maven Local
         run: |
-          ./gradlew publishToMavenLocal
+          gradle publishToMavenLocal
         env:
           MAVEN_PUBLISH_USERNAME: "mock_user"
           MAVEN_PUBLISH_PASSWORD: "mock_password"
@@ -69,6 +79,6 @@ jobs:
             ### Automated Build Artifacts
             This release contains the compiled AAR library supporting all major Android ABIs (armeabi-v7a, arm64-v8a, x86, x86_64).
           files: |
-            output/android-awt.aar
+            output/MC2MT-android.aar
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
